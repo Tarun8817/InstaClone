@@ -1,8 +1,6 @@
 const postModel = require('../model/post.model');
 const ImageKit = require('@imagekit/nodejs');
 const { toFile } = require('@imagekit/nodejs');
-const jwt = require('jsonwebtoken');
-
 // Configure ImageKit SDK with environment variables
 const imagekit = new ImageKit({
     publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
@@ -17,22 +15,15 @@ const imagekit = new ImageKit({
  * - Saves post in MongoDB with caption, image URL, and user ID
  */
 async function createPostController(req, res) {
-    const token = req.cookies.token;
-    if (!token) {
-        return res.status(401).json({ message: "Token not provided. Unauthorized access" });
-    }
 
-    let decoded;
-    try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return res.status(401).json({ message: "User not authorized" });
+    if (!req.file) {
+        return res.status(400).json({ message: "Image is required" });
     }
 
     try {
         // Upload image to ImageKit
         const file = await imagekit.files.upload({
-            file: await toFile(Buffer.from(req.file.buffer), 'file'),
+           file: await toFile(req.file.buffer, req.file.originalname),
             fileName: "Test",
             folder: "Insta-clone"
         });
@@ -41,7 +32,7 @@ async function createPostController(req, res) {
         const post = await postModel.create({
             caption: req.body.caption,
             imgUrl: file.url,
-            user: decoded.id
+            user: req.user.id
         });
 
         return res.status(201).json({
@@ -59,26 +50,20 @@ async function createPostController(req, res) {
  * - Fetches posts from MongoDB by user ID
  */
 async function getPostController(req, res) {
-    const token = req.cookies.token;
-    if (!token) {
-        return res.status(401).json({ message: "Unauthorized access" });
-    }
-
-    let decoded;
-    try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return res.status(401).json({ message: "Token invalid" });
-    }
+    const userId = req.user.id;
 
     try {
-        const posts = await postModel.find({ user: decoded.id });
+        const posts = await postModel.find({ user: userId });
+
         return res.status(200).json({
             message: "Posts fetched successfully",
-            posts
+            posts,
         });
     } catch (err) {
-        return res.status(500).json({ message: "Error fetching posts", error: err.message });
+        return res.status(500).json({
+            message: "Error fetching posts",
+            error: err.message,
+        });
     }
 }
 
@@ -89,40 +74,30 @@ async function getPostController(req, res) {
  * - Ensures the post belongs to the requesting user
  */
 async function getPostDetailsController(req, res) {
-    const token = req.cookies.token;
-    if (!token) {
-        return res.status(401).json({ message: "Unauthorized access" });
-    }
-
-    let decoded;
-    try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (err) {
-        return res.status(401).json({ message: "Invalid token" });
-    }
-
-    const userId = decoded.id;
+    const userId = req.user.id;
     const postId = req.params.postId;
 
     try {
-        const post = await postModel.findById(postId);
+        const post = await postModel.findOne({
+            _id: postId,
+            user: userId,
+        });
+
         if (!post) {
             return res.status(404).json({
-                message: "Post not found." 
+                message: "Post not found or unauthorized",
             });
-        }
-
-        // Check ownership
-        if (post.user.toString() !== userId) {
-            return res.status(403).json({ message: "Forbidden content" });
         }
 
         return res.status(200).json({
             message: "Post fetched successfully",
-            post
+            post,
         });
     } catch (err) {
-        return res.status(500).json({ message: "Error fetching post details", error: err.message });
+        return res.status(500).json({
+            message: "Error fetching post details",
+            error: err.message,
+        });
     }
 }
 
